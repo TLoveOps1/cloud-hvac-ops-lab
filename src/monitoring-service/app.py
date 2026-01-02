@@ -4,6 +4,7 @@ import time
 import threading
 import pika
 import requests
+from datetime import datetime
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
@@ -176,6 +177,39 @@ def health_check():
         return jsonify({"status": "healthy", "message": "Monitoring service operational and connected to dependencies"}), 200
     except (pika.exceptions.AMQPConnectionError, requests.exceptions.RequestException) as e:
         return jsonify({"status": "unhealthy", "message": f"Monitoring service dependency issue: {e}"}), 500
+
+
+@app.route('/status', methods=['GET'])
+def status_check():
+    sensor_url = 'http://sensor-service:5000/reading'
+    checked_at = datetime.utcnow().isoformat() + 'Z'
+    try:
+        resp = requests.get(sensor_url, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        temp = float(data.get('temp_f'))
+        sensor_id = data.get('sensor_id')
+
+        # Determine state
+        if 68.0 <= temp <= 75.0:
+            state = 'OK'
+        elif (65.0 <= temp < 68.0) or (75.0 < temp <= 78.0):
+            state = 'WARN'
+        else:
+            state = 'ALARM'
+
+        return jsonify({
+            'service': 'monitoring-service',
+            'sensor_url': sensor_url,
+            'sensor_id': sensor_id,
+            'temp_f': temp,
+            'state': state,
+            'checked_at': checked_at
+        }), 200
+    except requests.exceptions.RequestException as e:
+        return jsonify({'service': 'monitoring-service', 'state': 'UNKNOWN', 'error': str(e), 'checked_at': checked_at}), 503
+    except (ValueError, KeyError) as e:
+        return jsonify({'service': 'monitoring-service', 'state': 'UNKNOWN', 'error': f'Invalid sensor response: {e}', 'checked_at': checked_at}), 503
 
 if __name__ == '__main__':
     # Start consumer in a separate thread

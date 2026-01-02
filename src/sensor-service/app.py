@@ -2,6 +2,7 @@ import os
 import time
 import json
 import random
+from datetime import datetime
 import pika
 from flask import Flask, jsonify
 
@@ -55,6 +56,18 @@ def health_check():
         return jsonify({"status": "healthy", "message": "Sensor service is operational and connected to message queue"}), 200
     except pika.exceptions.AMQPConnectionError:
         return jsonify({"status": "unhealthy", "message": "Sensor service cannot connect to message queue"}), 500
+
+
+@app.route('/reading', methods=['GET'])
+def get_reading():
+    temp = round(random.uniform(68.0, 75.0), 2)
+    data = {
+        'sensor_id': 'sensor-1',
+        'temp_f': temp,
+        'status': 'OK',
+        'timestamp': datetime.utcnow().isoformat() + 'Z'
+    }
+    return jsonify(data), 200
 
 if __name__ == '__main__':
     # Simulate continuous data generation in a separate thread/process for local testing
