@@ -1,0 +1,210 @@
+name: CI/CD Pipeline for Cloud HVAC Microservices
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  PYTHON_VERSION: '3.9'
+  NODE_VERSION: '18'
+  # Define a list of microservices to iterate over
+  MICROSERVICES: |
+    sensor-service
+    monitoring-service
+    logging-service
+    alerting-service
+    automation-service
+
+jobs:
+  lint_and_test_python_services:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [sensor-service, monitoring-service, logging-service, alerting-service, automation-service, shared]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies for ${{ matrix.service }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black pytest pytest-cov
+          if [ -f "src/${{ matrix.service }}/requirements.txt" ]; then
+            pip install -r src/${{ matrix.service }}/requirements.txt
+          elif [ -f "src/${{ matrix.service }}/../shared/requirements.txt" ]; then
+            pip install -r src/shared/requirements.txt
+          fi
+        working-directory: .
+
+      - name: Run Flake8 linting for ${{ matrix.service }}
+        run: flake8 src/${{ matrix.service }}
+        working-directory: .
+        continue-on-error: true
+
+      - name: Run Black formatter check for ${{ matrix.service }}
+        run: black --check src/${{ matrix.service }}
+        working-directory: .
+        continue-on-error: true
+
+      - name: Run Pytest tests for ${{ matrix.service }}
+        run: |
+          if [ -d "tests/unit/${{ matrix.service }}" ]; then
+            pytest tests/unit/${{ matrix.service }}
+          elif [ -d "src/${{ matrix.service }}/tests" ]; then
+            pytest src/${{ matrix.service }}/tests
+          else
+            echo "No specific unit tests found for ${{ matrix.service }}, skipping."
+          fi
+        working-directory: .
+
+  build_and_push_docker_images:
+    needs: lint_and_test_python_services
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [sensor-service, monitoring-service, logging-service, alerting-service, automation-service]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image for ${{ matrix.service }}
+        run: |
+          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
+          docker build -t $IMAGE_NAME:${{ github.sha }} -f src/${{ matrix.service }}/Dockerfile src/${{ matrix.service }}
+          docker push $IMAGE_NAME:${{ github.sha }}
+          docker tag $IMAGE_NAME:${{ github.sha }} $IMAGE_NAME:latest
+          docker push $IMAGE_NAME:latest
+
+  run_integration_tests:
+    needs: build_and_push_docker_images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies for integration tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/integration/requirements.txt
+
+      - name: Start Docker Compose services for integration tests
+        run: docker compose up -d
+        working-directory: .
+
+      - name: Wait for services to be healthy
+        run: |
+          docker compose ps
+          docker compose logs
+          # Simple wait, replace with more robust health check if needed
+          sleep 30
+        working-directory: .
+
+      - name: Run Pytest integration tests
+        run: pytest tests/integration
+        working-directory: .
+
+      - name: Stop Docker Compose services
+        if: always()
+        run: docker compose down
+        working-directory: .
+
+  security_scan:
+    needs: build_and_push_docker_images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run SonarQube Scan (Placeholder)
+        run: |
+          echo "Running SonarQube scan..."
+          # Example: sonar-scanner -Dsonar.projectKey=cloud-hvac-operations-lab -Dsonar.sources=.
+          echo "Security scan complete."
+
+      - name: Run IaC Security Scan (Checkov/tfsec Placeholder)
+        run: |
+          echo "Running IaC security scan..."
+          # Example: checkov -d infra/terraform
+          echo "IaC security scan complete."
+
+  deploy_staging:
+    needs: [run_integration_tests, security_scan]
+    runs-on: ubuntu-latest
+    environment:
+      name: Staging
+      url: https://staging.cloud-hvac.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.x
+
+      - name: Terraform Init (Staging)
+        run: terraform init
+        working-directory: ./infra/terraform/staging
+
+      - name: Terraform Apply (Staging)
+        run: terraform apply -auto-approve -var="image_tag=${{ github.sha }}"
+        working-directory: ./infra/terraform/staging
+
+  deploy_production:
+    needs: deploy_staging
+    runs-on: ubuntu-latest
+    environment:
+      name: Production
+      url: https://cloud-hvac.example.com
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.x
+
+      - name: Terraform Init (Production)
+        run: terraform init
+        working-directory: ./infra/terraform/production
+
+      - name: Terraform Apply (Production)
+        run: terraform apply -auto-approve -var="image_tag=${{ github.sha }}"
+        working-directory: ./infra/terraform/production

@@ -1,0 +1,32 @@
+{
+  "name": "cloud-hvac-operations-lab",
+  "version": "1.0.0",
+  "description": "Cloud-based simulation of a Building Automation System (BAS) using microservices.",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "test:e2e": "jest --config jest.e2e.config.js",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "keywords": [
+    "cloud",
+    "hvac",
+    "microservices",
+    "sre",
+    "devops",
+    "automation"
+  ],
+  "author": "GitHub Engineering Lead",
+  "license": "MIT",
+  "devDependencies": {
+    "@babel/preset-env": "^7.24.7",
+    "@babel/preset-typescript": "^7.24.7",
+    "@types/jest": "^29.5.12",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.3.2",
+    "ts-jest": "^29.1.5",
+    "typescript": "^5.5.2"
+  }
+}
