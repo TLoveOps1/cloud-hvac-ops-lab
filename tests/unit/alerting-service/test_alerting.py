@@ -1,7 +1,29 @@
 import pytest
 import json
+import os
+import requests
+import importlib.util
+from pathlib import Path
 from unittest.mock import patch, MagicMock
-from src.alerting-service.app import app, send_slack_notification, trigger_alert
+
+# If Flask isn't installed locally, skip these tests to be friendly for devs
+try:
+    import flask  # noqa: F401
+except ModuleNotFoundError:
+    pytest.skip("flask not installed", allow_module_level=True)
+
+# Load alerting module from file path because the package folder uses a hyphen
+spec = importlib.util.spec_from_file_location(
+    "alerting_app",
+    str(Path(__file__).resolve().parents[3] / 'src' / 'alerting-service' / 'app.py')
+)
+alerting_app = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(alerting_app)
+
+# Re-export symbols expected by tests
+app = alerting_app.app
+send_slack_notification = alerting_app.send_slack_notification
+trigger_alert = alerting_app.trigger_alert
 
 @pytest.fixture
 def client():
@@ -9,22 +31,22 @@ def client():
     with app.test_client() as client:
         yield client
 
-@patch('src.alerting-service.app.requests.post')
-def test_send_slack_notification_success(mock_post):
+@patch.object(alerting_app, 'requests')
+def test_send_slack_notification_success(mock_requests):
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
-    mock_post.return_value = mock_response
+    mock_requests.post.return_value = mock_response
 
     with patch.dict(os.environ, {'SLACK_WEBHOOK_URL': 'http://mock-slack-webhook.com'}):
         send_slack_notification("Test message")
 
-    mock_post.assert_called_once_with(
+    mock_requests.post.assert_called_once_with(
         'http://mock-slack-webhook.com',
         headers={'Content-type': 'application/json'},
         data=json.dumps({'text': 'Test message'})
     )
 
-@patch('src.alerting-service.app.requests.post', side_effect=requests.exceptions.RequestException('Network error'))
+@patch.object(alerting_app.requests, 'post', side_effect=requests.exceptions.RequestException('Network error'))
 def test_send_slack_notification_failure(mock_post, capsys):
     with patch.dict(os.environ, {'SLACK_WEBHOOK_URL': 'http://mock-slack-webhook.com'}):
         send_slack_notification("Test message")
@@ -32,7 +54,7 @@ def test_send_slack_notification_failure(mock_post, capsys):
     captured = capsys.readouterr()
     assert "Error sending Slack notification" in captured.out
 
-@patch('src.alerting-service.app.send_slack_notification')
+@patch.object(alerting_app, 'send_slack_notification')
 def test_trigger_alert_endpoint_success(mock_send_slack_notification, client):
     alert_data = {
         'incident_type': 'High Temperature',
