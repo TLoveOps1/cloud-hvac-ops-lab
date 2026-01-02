@@ -3,6 +3,7 @@ import time
 import json
 import random
 from datetime import datetime
+
 import pika
 from flask import Flask, jsonify
 
@@ -14,7 +15,12 @@ QUEUE_NAME = 'sensor_data'
 
 def publish_message(message):
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=MESSAGE_QUEUE_HOST, port=MESSAGE_QUEUE_PORT))
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(
+                host=MESSAGE_QUEUE_HOST,
+                port=MESSAGE_QUEUE_PORT,
+            )
+        )
         channel = connection.channel()
         channel.queue_declare(queue=QUEUE_NAME, durable=True)
         channel.basic_publish(
@@ -29,8 +35,11 @@ def publish_message(message):
         connection.close()
     except pika.exceptions.AMQPConnectionError as e:
         print(f" [!] Failed to connect to RabbitMQ: {e}. Retrying...")
-        time.sleep(5) # Wait before retrying
-        # In a real application, you'd want a more robust retry mechanism or circuit breaker
+        time.sleep(5)  # Wait before retrying
+        # In a real application, you'd want a more robust retry mechanism or
+        # circuit breaker
+
+
 
 @app.route('/generate_data', methods=['POST'])
 def generate_data():
@@ -45,33 +54,65 @@ def generate_data():
         'status': 'normal'
     }
     publish_message(data)
-    return jsonify({"status": "success", "message": "Data generated and published", "data": data}), 200
+
+    return jsonify({
+        "status": "success",
+        "message": "Data generated and published",
+        "data": data,
+    }), 200
+
+
 
 @app.route('/health', methods=['GET'])
 def health_check():
     # Basic health check: try to connect to RabbitMQ
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=MESSAGE_QUEUE_HOST, port=MESSAGE_QUEUE_PORT, heartbeat=0))
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(
+                host=MESSAGE_QUEUE_HOST,
+                port=MESSAGE_QUEUE_PORT,
+                heartbeat=0,
+            )
+        )
         connection.close()
-        return jsonify({"status": "healthy", "message": "Sensor service is operational and connected to message queue"}), 200
+        return jsonify({
+            "status": "healthy",
+            "message": "Sensor service is operational and connected to message queue",
+        }), 200
     except pika.exceptions.AMQPConnectionError:
-        return jsonify({"status": "unhealthy", "message": "Sensor service cannot connect to message queue"}), 500
+        return jsonify({
+            "status": "unhealthy",
+            "message": "Sensor service cannot connect to message queue",
+        }), 500
+
+
 
 
 @app.route('/reading', methods=['GET'])
 def get_reading():
-    temp = round(random.uniform(68.0, 75.0), 2)
+    # Support a fault mode for testing via env var SENSOR_FAULT_MODE: normal
+    # (default), hot, cold
+    fault_mode = os.getenv('SENSOR_FAULT_MODE', 'normal').lower()
+    if fault_mode == 'hot':
+        temp = round(random.uniform(83.0, 87.0), 2)
+    elif fault_mode == 'cold':
+        temp = round(random.uniform(58.0, 62.0), 2)
+    else:
+        temp = round(random.uniform(68.0, 75.0), 2)
+
     data = {
         'sensor_id': 'sensor-1',
         'temp_f': temp,
         'status': 'OK',
-        'timestamp': datetime.utcnow().isoformat() + 'Z'
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
     }
+
     return jsonify(data), 200
 
 if __name__ == '__main__':
-    # Simulate continuous data generation in a separate thread/process for local testing
-    # In a production microservice, this would likely be a scheduled task or triggered externally.
+    # Simulate continuous data generation in a separate thread/process for local
+    # testing. In a production microservice, this would likely be a scheduled
+    # task or triggered externally.
     import threading
     def continuous_generation():
         while True:
