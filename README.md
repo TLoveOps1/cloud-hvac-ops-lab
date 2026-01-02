@@ -90,6 +90,15 @@ Ensure you have the following installed:
 *   [Runbooks](docs/runbooks/)
 *   [Post-Mortem Template](docs/postmortems/template.md)
 
+## Security & Incident Response
+
+This project includes a documented real-world security incident and remediation:
+
+- **Postmortem:** [Accidental Secret Exposure (Slack Webhook)](docs/postmortems/secret-exposure.md)
+
+The incident demonstrates secure secret handling, git history rewriting, and DevSecOps best practices.
+
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
